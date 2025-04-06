@@ -3,7 +3,7 @@ from pyspark.sql import SparkSession
 # # Налаштування конфігурації SQL бази даних
 jdbc_url = "jdbc:mysql://217.61.57.46:3306/olympic_dataset"
 jdbc_table = "athlete_event_results"
-jdbc_user = "username"
+jdbc_user = "admin"
 jdbc_password = "password"
 
 # # Створення Spark сесії
