@@ -1,343 +1,181 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
-
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, FloatType
-from pyspark.sql.functions import col, from_json
-
+from pyspark.sql.functions import col, avg, current_timestamp, from_json, to_json, struct
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
 import config
-# import settings as set
-from pyspark.sql.functions import to_json, struct, col
-from kafka.admin import KafkaAdminClient, NewTopic
 
-# config.py under .gitignore
+# MySQL and Kafka configuration
 jdbc_url = config.jdbc_url
 jdbc_user = config.jdbc_user
 jdbc_password = config.jdbc_password
-driver = 'com.mysql.cj.jdbc.Driver'
-jdbc_bio = "athlete_bio"
-jdbc_result = "athlete_event_results"
-
 kafka_bootstrap = config.kafka_url
 kafka_user = config.kafka_user
 kafka_password = config.kafka_password
-kafka_topic = "vekh__athlete_event_results"
-
-#
+security_protocol = config.security_protocol
+sasl_mechanism = config.sasl_mechanism
+kafka_topic_input = "vekh__athlete_event_results"
+kafka_topic_output = "vekh__aggregated_results"
 SPARK_PACKAGES = [
-    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5",
-    "org.apache.spark:spark-streaming-kafka-0-10_2.12:3.5.5"
+    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+    "org.apache.spark:spark-streaming-kafka-0-10_2.12:3.5.1"
 ]
-SPARK_JARS = [
-    "jars/mysql-connector-j-8.0.32.jar"  # локальний шлях
-]
+# Initialize Spark session
 spark = SparkSession.builder \
+    .appName("StreamingAthletePipeline") \
+    .config("spark.jars", "jars/mysql-connector-j-8.0.32.jar") \
     .config("spark.jars.packages", ",".join(SPARK_PACKAGES)) \
-    .config("spark.jars", ",".join(SPARK_JARS)) \
-    .appName("JDBCToKafka") \
+    .config("spark.sql.shuffle.partitions", "4") \
+    .config("spark.streaming.backpressure.enabled", "true") \
     .getOrCreate()
 
-# SPARK_JARS: list[str] = [
-#     "jars/spark-sql-kafka-0-10_2.12-3.5.5.jar",
-#     "jars/spark-streaming-kafka-0-10_2.12:3.5.5.jar",
-#     "jars/mysql-connector-j-8.0.32.jar"
-# ]
-#
-# spark = SparkSession.builder \
-#     .config("spark.jars.packages", ",".join(SPARK_JARS[:2])) \
-#     .config("spark.jars", SPARK_JARS[2]) \
-#     .appName("JDBCToKafka") \
-#     .getOrCreate()
-
-#
-# # # Створення Spark сесії
-# spark = SparkSession.builder \
-#     .config("spark.jars", "jars/mysql-connector-j-8.0.32.jar") \
-#     .appName("JDBCToKafka") \
-#     .getOrCreate()
-
-
-# Читання даних з SQL бази даних
-df = spark.read.format('jdbc').options(
+print("Етап 1. Читання з даних з SQL")
+# Read athlete biographical data from MySQL
+df_bio = spark.read.format('jdbc').options(
     url=jdbc_url,
-    driver=driver,
-    dbtable=jdbc_bio,
+    driver='com.mysql.cj.jdbc.Driver',
+    dbtable="athlete_bio",
     user=jdbc_user,
-    password=jdbc_password) \
-    .load()
-# df.show()
+    password=jdbc_password
+).load()
 
-# Конвертуємо height і weight в числовий тип
-df_cleaned = df.withColumn("height", col("height").cast("double")) \
-               .withColumn("weight", col("weight").cast("double"))
-
-# Фільтруємо рядки, де height і weight не null
-df_filtered = df_cleaned.filter(
-    col("height").isNotNull() & col("weight").isNotNull()
+print("Етап 2. Очищення")
+# Filter rows with valid height and weight values
+df_bio_clean = df_bio.filter(
+    (col("height").isNotNull()) & (col("weight").isNotNull()) &
+    (col("height").cast("double").isNotNull()) & (col("weight").cast("double").isNotNull())
 )
-df_filtered.show()
-
-# ## ------------------------------------------------
-
-# Готуємо дані для Kafka (ключ не обов'язковий, value — обов'язково string або bytes)
-#df_to_kafka = df_filtered.selectExpr("CAST('athlete_id' AS STRING) AS key") \
-#    .withColumn("value", to_json(struct([col(c) for c in df_filtered.columns])))
-
-# df_to_kafka = df_filtered.withColumn("value", to_json(struct([col(c) for c in df_filtered.columns])))
-
-df_to_kafka = df_filtered.withColumn("value", to_json(struct([col(c) for c in df_filtered.columns]))).select("value")
-
-df_to_kafka.show()
-
-# # Створення нового топіку
-# admin_client = KafkaAdminClient(
-#     bootstrap_servers=config.kafka_url,
-#     security_protocol=config.security_protocol,
-#     sasl_mechanism=config.sasl_mechanism,
-#     sasl_plain_username=config.kafka_user,
-#     sasl_plain_password=config.kafka_password
-# )
-# topic_name = kafka_topic        # Визначення нового топіку
-# num_partitions = 2
-# replication_factor = 1
-# new_topic = NewTopic(name=topic_name, num_partitions=num_partitions, replication_factor=replication_factor)
-#
-# # Створення нового топіку
-# try:
-#     admin_client.create_topics(new_topics=[new_topic], validate_only=False)
-#     print(f"Topic '{topic_name}' created successfully.")
-# except Exception as e:
-#     print(f"An error occurred: {e}")
-#
-# print(admin_client.list_topics())       # Перевіряємо список існуючих топіків
-# admin_client.close()        # Закриття зв'язку з клієнтом
+df_bio_clean = df_bio_clean.withColumn("athlete_id", col("athlete_id").cast("int"))
+df_bio_clean = df_bio_clean.withColumn("height", col("height").cast("double"))
+df_bio_clean = df_bio_clean.withColumn("weight", col("weight").cast("double"))
 
 
-#
-# df_to_kafka.write \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", kafka_bootstrap) \
-#     .option("topic", kafka_topic) \
-#     .save()
-# print("1111111111111111111111111111111111111111111111")
 
-# Запис у Kafka (batch, не streaming)
-print("Запис в кафка топік")
-df_to_kafka.write \
-    .format("kafka") \
+# Read competition results from MySQL and send to Kafka (one-time batch operation)
+df_results = spark.read.format('jdbc').options(
+    url=jdbc_url,
+    driver='com.mysql.cj.jdbc.Driver',
+    dbtable="athlete_event_results",
+    user=jdbc_user,
+    password=jdbc_password
+).load()
+
+print("Етап 3a. Запис в кафка топік")
+df_results.selectExpr("CAST(athlete_id AS STRING) as key", "to_json(struct(*)) AS value") \
+    .write.format("kafka") \
     .option("kafka.bootstrap.servers", kafka_bootstrap) \
-    .option("topic", kafka_topic) \
-    .option("kafka.security.protocol", config.security_protocol) \
-    .option("kafka.sasl.mechanism", config.sasl_mechanism) \
+    .option("topic", kafka_topic_input) \
+    .option("kafka.security.protocol", security_protocol) \
+    .option("kafka.sasl.mechanism", sasl_mechanism) \
     .option("kafka.sasl.jaas.config", f'org.apache.kafka.common.security.plain.PlainLoginModule required username="{kafka_user}" password="{kafka_password}";') \
     .save()
 
-print("     Запис завершено")
-
-
-# admin_client = KafkaAdminClient(
-#     bootstrap_servers=config.kafka_url,
-#     security_protocol=config.security_protocol,
-#     sasl_mechanism=config.sasl_mechanism,
-#     sasl_plain_username=config.kafka_user,
-#     sasl_plain_password=config.kafka_password
-# )
-#
-# # Визначення нового топіку
-# topic_name = kafka_topic
-# num_partitions = 2
-# replication_factor = 1
-#
-# new_topic = NewTopic(name=topic_name, num_partitions=num_partitions, replication_factor=replication_factor)
-#
-# # Створення нового топіку
-# try:
-#     admin_client.create_topics(new_topics=[new_topic], validate_only=False)
-#     print(f"Topic '{topic_name}' created successfully.")
-# except Exception as e:
-#     print(f"An error occurred: {e}")
-#
-# # Перевіряємо список існуючих топіків
-# print(admin_client.list_topics())
-#
-# # Закриття зв'язку з клієнтом
-# admin_client.close()
-## ------------------------------------------------------
-
-# (WORKING - NOT NEED )# Назва топіку
-# topic_name = kafka_topic
-# df_to_kafka.selectExpr("CAST(uuid() AS STRING) AS key", "to_json(struct(*)) AS value") \
-#     .write \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", config.kafka_url) \
-#     .option("kafka.security.protocol", config.security_protocol) \
-#     .option("kafka.sasl.mechanism", config.sasl_mechanism) \
-#     .option("kafka.sasl.jaas.config", f'org.apache.kafka.common.security.plain.PlainLoginModule required username="{config.kafka_user}" password="{config.kafka_password}";') \
-#     .option("topic", kafka_topic) \
-#     .save()
-# print('      writed 222222222222222222222222222222222222222222222222')
-print("Запис в кафка топік низькорівневий")
-# Запис у kafka
-from kafka import KafkaProducer
-import json
-import uuid
-import time
-import random
-
-# Створення Kafka Producer
-producer = KafkaProducer(
-    bootstrap_servers=config.kafka_url,
-    security_protocol=config.security_protocol,
-    sasl_mechanism=config.sasl_mechanism,
-    sasl_plain_username=config.kafka_user,
-    sasl_plain_password=config.kafka_password,
-    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-    key_serializer=lambda v: json.dumps(v).encode('utf-8')
-)
-
-# (NOT WORKING  ERROR astype(str)) # ✅ Запис кожного рядка df_filtered у Kafka
-# # df_to_kafka3 = df_to_kafka.astype(str)
-# for idx, row in df_to_kafka.iterrows():
-#     try:
-#         data_dict = row.to_dict()  # перетворення рядка у dict
-#         key = str(uuid.uuid4())  # унікальний ключ для повідомлення
-#         producer.send(topic_name, key=key, value=data_dict)
-#         producer.flush()
-#         print(f"Message {idx} sent: {data_dict}")
-#     except Exception as e:
-#         print(f"Failed to send row {idx}: {e}")
-#
-# producer.close()
-
-
-# print("Запис в кафка топік низькорівневий")
-# topic_name = kafka_topic
-# for i in range(30):
-#     # Відправлення повідомлення в топік
-#     try:
-#         data = {
-#             "timestamp": time.time(),  # Часова мітка
-#             "value": random.randint(1, 100)  # Випадкове значення
-#         }
-#         producer.send(topic_name, key=str(uuid.uuid4()), value=data)
-#         producer.flush()  # Очікування, поки всі повідомлення будуть відправлені
-#         print(f"Message {i} sent to topic '{topic_name}' successfully.")
-#         time.sleep(2)
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-#
-# producer.close()  # Закриття producer
-# print("     Запис низькорівневий завершено")
-
-
-print("Читання з кафка топіку")
-df_raw = spark.read \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", config.kafka_url) \
-    .option("subscribe", kafka_topic) \
-    .option("startingOffsets", "earliest") \
-    .option("kafka.security.protocol", config.security_protocol) \
-    .option("kafka.sasl.mechanism", config.sasl_mechanism) \
-    .option("kafka.sasl.jaas.config", f'org.apache.kafka.common.security.plain.PlainLoginModule required username="{config.kafka_user}" password="{config.kafka_password}";') \
-    .load()
-print("      Читання з кафка топіку завершено")
-
-df_raw.selectExpr("CAST(value AS STRING) as json_str").show(truncate=False)
-
-
-# Схема, яка відповідає JSON
+print("Етап 3b. Читання з кафка топіку")
+# Define schema for parsing JSON from Kafka
 schema = StructType([
-    StructField("athlete_id", StringType()),
-    StructField("name", StringType()),
-    StructField("sex", StringType()),
-    StructField("born", StringType()),
-    StructField("height", DoubleType()),
-    StructField("weight", DoubleType()),
-    StructField("country", StringType()),
-    StructField("country_noc", StringType()),
-    StructField("description", StringType()),
-    StructField("special_notes", StringType())
+    StructField("edition", StringType(), True),
+    StructField("edition_id", StringType(), True),
+    StructField("country_noc", StringType(), True),
+    StructField("sport", StringType(), True),
+    StructField("event", StringType(), True),
+    StructField("result_id", StringType(), True),
+    StructField("athlete", StringType(), True),
+    StructField("athlete_id", IntegerType(), True),
+    StructField("pos", StringType(), True),
+    StructField("medal", StringType(), True),
+    StructField("isTeamSport", StringType(), True)
 ])
 
-
-df_parsed = df_raw.selectExpr("CAST(value AS STRING) as json_str") \
-    .select(from_json(col("json_str"), schema).alias("data")) \
-    .select("data.*")
-
-# from pyspark.sql.functions import to_date
-# df_parsed = df_parsed.withColumn("born_clean", to_date(col("born"), "dMMMMuuuu"))
-
-print("Розпарсено таблицю:")
-df_parsed.show(truncate=False)
-
-
-##-------------------------------------------------------
-
-
-
-
-
-
-# “.format("kafka") \\ .option("kafka.bootstrap.servers", "localhost:9092") \\ .option("subscribe", "athlete\_event\_results") \\ .load()”
-
-
-#
-# df_kafka_ready = df_filtered.select(to_json(struct("*")).alias("value"))
-#
-# df_kafka_ready.write \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", "localhost:9092") \
-#     .option("topic", "athlete_event_results") \
-#     .save()
-#
-# # Зчитати дані з Kafka
-# df_kafka = spark.read \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", "localhost:9092") \
-#     .option("subscribe", "athlete_event_results") \
-#     .load()
-#
-#
-# from pyspark.sql.functions import from_json
-# from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
-#
-# # Перетворити JSON
-# schema = StructType([
-#     StructField("ID", IntegerType()),
-#     StructField("Name", StringType()),
-#     StructField("Sex", StringType()),
-#     StructField("Age", IntegerType()),
-#     StructField("Height", DoubleType()),
-#     StructField("Weight", DoubleType()),
-#     StructField("Team", StringType()),
-#     StructField("NOC", StringType()),
-#     StructField("Games", StringType()),
-#     StructField("Year", IntegerType()),
-#     StructField("Season", StringType()),
-#     StructField("City", StringType()),
-#     StructField("Sport", StringType()),
-#     StructField("Event", StringType()),
-#     StructField("Medal", StringType())
-# ])
-#
-# df_json = df_kafka.selectExpr("CAST(value AS STRING)") \
-#     .select(from_json(col("value"), schema).alias("data")) \
-#     .select("data.*")
-#
-# df_json.show(5)
-
-
-df_results = spark.read.format('jdbc').options(
-    url=jdbc_url,
-    driver=driver,
-    dbtable=jdbc_result,
-    user=jdbc_user,
-    password=jdbc_password) \
+# Read Kafka topic as streaming source
+df_kafka = spark.readStream.format("kafka") \
+    .option("kafka.bootstrap.servers", kafka_bootstrap) \
+    .option("subscribe", kafka_topic_input) \
+    .option("startingOffsets", "earliest") \
+    .option("kafka.security.protocol", security_protocol) \
+    .option("kafka.sasl.mechanism", sasl_mechanism) \
+    .option("kafka.sasl.jaas.config", f'org.apache.kafka.common.security.plain.PlainLoginModule required username="{kafka_user}" password="{kafka_password}";') \
     .load()
 
-df_results.show()
+# df_kafka.writeStream.format("console").start().awaitTermination()
 
-print("join таблиць")
-df_joined = df_results.join(df_parsed, on="athlete_id", how="inner")
-df_joined.select("athlete_id", "name", "sex", "born", "event", "medal").show(truncate=False)
+print("Етап 3c. Парсiнг таблицi:")
+# Deserialize JSON messages from Kafka
+df_kafka_json = df_kafka.selectExpr("CAST(value AS STRING)") \
+    .select(from_json("value", schema).alias("data")) \
+    .select("data.*") \
+    .withColumn("athlete_id", col("athlete_id").cast("int"))
+
+df_kafka_json.printSchema()
+df_bio_clean.printSchema()
+
+print("Етап 4. join таблиць")
+# Join streaming data with athlete bio data
+df_bio_clean = df_bio_clean.drop("country_noc")
+df_joined = df_kafka_json.join(df_bio_clean, on="athlete_id", how="inner")
+print(df_joined.columns)
+
+
+
+
+print("Етап 5. Агрегацiя")
+# Aggregate average height/weight by sport, medal, sex, and country
+df_aggregated = df_joined.groupBy("sport", "medal", "sex", "country_noc").agg(
+    avg("height").alias("avg_height"),
+    avg("weight").alias("avg_weight"),
+    current_timestamp().alias("timestamp")
+)
+
+print(df_aggregated.columns)
+
+print("Етап 6. Стрим результату")
+# Function to write batch output to Kafka and MySQL
+def write_to_kafka_and_mysql(batch_df, batch_id):
+    print(f"\n--- Processing batch {batch_id} ---")
+    if batch_df.count() > 0:
+        try:
+            # Write to Kafka
+            batch_df.selectExpr("to_json(struct(*)) AS value") \
+                .write.format("kafka") \
+                .option("kafka.bootstrap.servers", kafka_bootstrap) \
+                .option("topic", kafka_topic_output) \
+                .option("kafka.security.protocol", security_protocol) \
+                .option("kafka.sasl.mechanism", sasl_mechanism) \
+                .option("kafka.sasl.jaas.config", f'org.apache.kafka.common.security.plain.PlainLoginModule required username="{kafka_user}" password="{kafka_password}";') \
+                .save()
+            # Optionally write to MySQL (for persistent storage)
+            batch_df.write.format("jdbc").options(
+                url=jdbc_url,
+                driver="com.mysql.cj.jdbc.Driver",
+                dbtable="vekh__aggregated_results",
+                user=jdbc_user,
+                password=jdbc_password
+            ).mode("append").save()
+        except Exception as e:
+            print(f"🔥 Помилка при записі: {e}")
+    else:
+        print("⚠️ Порожній batch")
+
+
+# Start the stream and write output periodically
+df_aggregated.writeStream \
+    .format("console") \
+    .option("truncate", "false") \
+    .foreachBatch(write_to_kafka_and_mysql) \
+    .outputMode("update") \
+    .trigger(processingTime="10 seconds") \
+    .option("checkpointLocation", "checkpoint/stream_join_aggregation") \
+    .start() \
+    .awaitTermination()
+
+
+print("Читання таблиці з MySQL для скриншоту")
+# Читання таблиці з MySQL
+df_mysql = spark.read \
+    .format("jdbc") \
+    .option("url", jdbc_url) \
+    .option("driver", "com.mysql.cj.jdbc.Driver") \
+    .option("dbtable", "vekh__aggregated_results") \
+    .option("user", jdbc_user) \
+    .option("password", jdbc_password) \
+    .load()
+df_mysql.show()
 
 spark.stop()
