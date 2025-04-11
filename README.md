@@ -91,3 +91,20 @@ Sample Query from MySQL Table
 - MySQL server running
 - pandas, pyspark, mysql-connector-python
 
+
+
+# 2. Building an End-to-End Batch Data Lake
+
+### Project Overview
+In this project, we work with athlete-related datasets:
+
+- athlete_bio.csv
+- athlete_event_results.csv
+
+The goal is to build a three-layer data lake architecture using batch data processing with Apache Spark. The pipeline consists of:
+
+- Landing Zone: raw CSV files are downloaded from the FTP server.
+- Bronze/Silver Layers: data is cleaned, deduplicated, and transformed into Parquet format.
+- Gold Layer: final analytical dataset is produced by merging and enriching the data.
+
+This ETL process is orchestrated with Apache Airflow.
