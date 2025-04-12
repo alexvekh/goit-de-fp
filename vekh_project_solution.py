@@ -12,7 +12,7 @@ with DAG(
     dag_id='vekh_project_solution',
     default_args=default_args,
     description='Multi-hop datalake pipeline with Spark',
-    schedule_interval=None,
+    schedule_interval='@daily',
     catchup=False,
     tags=["vekh"]
 ) as dag:

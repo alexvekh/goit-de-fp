@@ -1,40 +1,18 @@
-# goit-de-fp
+### goit-de-fp
 
-
-## 1. Building an End-to-End Streaming Pipeline 
-Ваша задача:
-1. Зчитати дані фізичних показників атлетів за допомогою Spark із MySQL таблиці.
-2. Відфільтрувати дані.
-3. Зчитати дані з результатами змагань з Kafka-топіку.
-4. Об’єднати дані з результатами змагань з Kafka-топіку з біологічними даними з MySQL таблиці.
-5. Зробити певні трансформації в даних.
-6. Зробити стрим даних (за допомогою функції forEachBatch) у:
-    а) вихідний кафка-топік,
-    b) базу даних.
-
-Ваша задача:
-1. Зчитати дані фізичних показників атлетів за допомогою Spark з MySQL таблиці olympic_dataset.athlete_bio (база даних і Credentials до неї вам будуть надані).
-2. Відфільтрувати дані, де показники зросту та ваги є порожніми або не є числами. Можна це зробити на будь-якому етапі вашої програми.
-3. Зчитати дані з mysql таблиці athlete_event_results і записати в кафка топік athlete_event_results. Зчитати дані з результатами змагань з Kafka-топіку athlete_event_results. Дані з json-формату необхідно перевести в dataframe-формат, де кожне поле json є окремою колонкою.
-4. Об’єднати дані з результатами змагань з Kafka-топіку з біологічними даними з MySQL таблиці за допомогою ключа athlete_id.
-5. Знайти середній зріст і вагу атлетів індивідуально для кожного виду спорту, типу медалі або її відсутності, статі, країни (country_noc). Додайте також timestamp, коли розрахунки були зроблені.
-6. Зробіть стрим даних (за допомогою функції forEachBatch) у:
-  - а) вихідний кафка-топік,
-  - b) базу даних.
-
-# Streaming with PySpark
+# 1.  Streaming Pipeline with PySpark
 
 This project demonstrates a real-time data processing pipeline using Apache Spark Structured Streaming. The goal is to process and aggregate Olympic athlete data streamed from a MySQL source and output real-time analytics based on sport, medal type, gender, and country.
 
-### Project File Flow
-- **config.py** – Stores shared configs: MySQL, Kafka, table and topic names.
-- **create_topic.py** – Creates the Kafka topic for streaming data.
-- **create_table.py** – Creates the MySQL table to store aggregated results.
-- **jdbc_to_kafka.py** – Reads data from MySQL and sends it to Kafka as JSON.
-- **kafka_to_pipeline.py** – Spark stream: reads Kafka, aggregates, writes to MySQL.
-- **read_table.py** – Reads and displays the aggregated MySQL table for verification.
+### 🗂️Project File Flow
+- *config.py* – Stores shared configs: MySQL, Kafka, table and topic names.
+- *create_topic.py* – Creates the Kafka topic for streaming data.
+- *create_table.py* – Creates the MySQL table to store aggregated results.
+- *jdbc_to_kafka.py* – Reads data from MySQL and sends it to Kafka as JSON.
+- *kafka_to_pipeline.py* – Spark stream: reads Kafka, aggregates, writes to MySQL.
+- *read_table.py* – Reads and displays the aggregated MySQL table for verification.
 
-### Technologies Used
+### 🔧Technologies Used
 - Apache Spark (Structured Streaming)
 - MySQL
 - PySpark
@@ -93,18 +71,53 @@ Sample Query from MySQL Table
 
 
 
-# 2. Building an End-to-End Batch Data Lake
+# 2. Batch Datalake Pipeline with Apache Spark
 
 ### Project Overview
+
+This project implements a multi-hop data pipeline using Apache Spark and Apache Airflow, designed to process large volumes of batch data in a scalable and modular way. The pipeline follows the classic Data Lake architecture using three layers: Landing (Raw) → Bronze → Silver → Gold.
+
 In this project, we work with athlete-related datasets:
 
 - athlete_bio.csv
 - athlete_event_results.csv
 
-The goal is to build a three-layer data lake architecture using batch data processing with Apache Spark. The pipeline consists of:
-
-- Landing Zone: raw CSV files are downloaded from the FTP server.
-- Bronze/Silver Layers: data is cleaned, deduplicated, and transformed into Parquet format.
-- Gold Layer: final analytical dataset is produced by merging and enriching the data.
-
 This ETL process is orchestrated with Apache Airflow.
+
+### 🔧 Technologies Used
+- Apache Spark: Distributed data processing
+- Apache Airflow: Workflow orchestration
+- HDFS / S3 / Local FS: Data storage layers
+- Git: Version control
+- Python: DAG orchestration and transformations
+
+### Pipeline Overview
+- *Landing to Bronze*
+
+    Raw data is ingested from source systems and stored in the Bronze layer with minimal transformation.
+
+- *Bronze to Silver*
+
+    Data is cleaned, validated, and enriched, preparing it for analytics or machine learning.
+
+- *Silver to Gold*
+
+    Business-level aggregations and optimized tables are created for dashboards and BI tools.
+
+### 🛠️ How It Works
+Each transformation step is written as a standalone Spark application.
+Tasks are orchestrated with Airflow’s SparkSubmitOperator.
+The pipeline can be triggered manually or scheduled to run daily (@daily).
+
+### 🚀 Getting Started
+Clone the repository
+Set up Airflow and Spark
+Configure the Airflow connection for Spark (spark-default)
+Deploy DAGs via Git or upload them manually
+Trigger the DAG in the Airflow UI or wait for the daily run
+
+### 🗂️Project File Flow
+- *landing_to_bronze.py* - Step 1: Load raw data to Bronze layer
+- *bronze_to_silver.py* - Step 2: Clean & transform data to Silver layer
+- *silver_to_gold.py* - Step 3: Aggregate & optimize data to Gold layer
+- *batch_datalake_pipeline.py* - Airflow DAG to orchestrate the full pipeline
