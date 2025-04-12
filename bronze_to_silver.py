@@ -38,6 +38,7 @@ for table_name in tables:
 
     # Видалення дублікатів
     df = df.dropDuplicates()
+    df.show()
 
     # Запис у Silver
     output_path = f"silver/{table_name}"

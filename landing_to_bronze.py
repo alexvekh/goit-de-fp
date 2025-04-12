@@ -35,6 +35,7 @@ for table_name in tablets:
     # Зчитування CSV за допомогою Spark
     print(f"        Reading {table_name} into Spark DataFrame...")
     df = spark.read.option("header", "true").csv(table_name + ".csv")
+    df.show()
 
     # Запис у форматі Parquet у папку bronze/{table_name}
     output_path = f"bronze/{table_name}"
